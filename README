@@ -1,0 +1,3 @@
+Map TCP and UDP ports using NAT-PMP or UPNP.  Unlike some other libraries,
+guarantee that we don't override other clients' ports, and that the
+mappings will expire even if the client crashes.
