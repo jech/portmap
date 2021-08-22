@@ -121,14 +121,14 @@ func (c *upnpClient) addPortMapping(label string, protocol string, port, externa
 	ep := externalPort
 	ok := false
 	for ep < 65535 {
-		p, c, e, d, l, err :=
+		p, c, e, _, l, err :=
 			ipc.GetSpecificPortMappingEntry("", ep, prot)
 		if err != nil || e == false || l <= 0 {
 			ok = true
 			break
 		}
 		a := net.ParseIP(c)
-		if a.Equal(myip) && p == port && d == label {
+		if a.Equal(myip) && p == port {
 			ok = true
 			break
 		}
@@ -232,15 +232,12 @@ type Status struct {
 // Map runs a portmapping loop for both TCP and UDP.  The kind parameter
 // indicates the portmapping protocols to attempt.
 //
-// The label is used with UPNP to avoid overwriting the mappings
-// established by a different client.
+// The label is passed to the UPNP server (it is not used with NAT-PMP)
+// and may be displayed in the router's user interface.
 //
 // The callback function is called whenever a mapping is established or
 // changes, or when an error occurs; it may be nil.
 func Map(ctx context.Context, label string, internal uint16, kind int, f func(proto string, status Status, err error)) error {
-	if label == "" {
-		label = "Go portmapping client"
-	}
 	cache := &clientCache{}
 	var wg sync.WaitGroup
 	wg.Add(2)
