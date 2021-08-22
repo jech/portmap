@@ -231,10 +231,12 @@ type Status struct {
 
 // Map runs a portmapping loop for both TCP and UDP.  The kind parameter
 // indicates the portmapping protocols to attempt.
-// The label is used to avoid overwriting the mappings established by
-// a different client when using UPNP (NAT-PMP does that automatically).
-// The callback function is called whenever a mapping changes or is
-// extended or an error occurs.
+//
+// The label is used with UPNP to avoid overwriting the mappings
+// established by a different client.
+//
+// The callback function is called whenever a mapping is established or
+// changes, or when an error occurs; it may be nil.
 func Map(ctx context.Context, label string, internal uint16, kind int, f func(proto string, status Status, err error)) error {
 	if label == "" {
 		label = "Go portmapping client"
@@ -271,9 +273,13 @@ func domap(ctx context.Context, label string, cache *clientCache, proto string, 
 				err = err2
 			}
 			client = nil
-			f(proto, status, err)
+			if f != nil {
+				f(proto, status, err)
+			}
 		} else if err != nil {
-			f(proto, status, err)
+			if f != nil {
+				f(proto, status, err)
+			}
 
 		}
 	}
@@ -320,11 +326,13 @@ func domap(ctx context.Context, label string, cache *clientCache, proto string, 
 		if lifetime < 30 {
 			lifetime = 30
 		}
-		f(proto, Status{
-			Internal: internal,
-			External: external,
-			Lifetime: time.Duration(lifetime) * time.Second,
-		}, nil)
+		if f != nil {
+			f(proto, Status{
+				Internal: internal,
+				External: external,
+				Lifetime: time.Duration(lifetime) * time.Second,
+			}, nil)
+		}
 		err = sleep(time.Duration(lifetime) * time.Second * 2 / 3)
 		if err != nil {
 			return
