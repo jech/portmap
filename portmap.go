@@ -63,7 +63,8 @@ func (c *natpmpClient) addPortMapping(label string, protocol string, port, exter
 type upnpClient ig1.WANIPConnection1
 
 // newUpnpClient attempts to discover a WAN IP Connection client on the
-// local network.  If more than one are found, it returns an arbitrary one.
+// local network.  If more than one are found, it tries to return one
+// that is on the default route.
 func newUpnpClient() (*upnpClient, error) {
 	clients, errs, err := ig1.NewWANIPConnection1Clients()
 	if err != nil {
@@ -74,6 +75,33 @@ func newUpnpClient() (*upnpClient, error) {
 			return nil, errs[0]
 		}
 		return nil, errors.New("no UPNP gateways found")
+	}
+
+	if len(clients) == 1 {
+		return (*upnpClient)(clients[0]), nil
+	}
+
+	gw, err := gateway.DiscoverGateway()
+	if err != nil {
+		return (*upnpClient)(clients[0]), nil
+	}
+
+	for _, client := range clients {
+		location := client.Location
+		if location == nil {
+			continue
+		}
+		host, _, err := net.SplitHostPort(location.Host)
+		if err != nil {
+			continue
+		}
+		ip := net.ParseIP(host)
+		if ip == nil {
+			continue
+		}
+		if ip.Equal(gw) {
+			return (*upnpClient)(client), nil
+		}
 	}
 
 	return (*upnpClient)(clients[0]), nil
