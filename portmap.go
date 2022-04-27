@@ -347,7 +347,10 @@ func domap(ctx context.Context, label string, cache *clientCache, proto string, 
 			unmap(err)
 			cache.reset()
 			client = nil
-			sleep(5 * time.Second)
+			err = sleep(5 * time.Second)
+			if err != nil {
+				return
+			}
 			continue
 		}
 		external = ep
