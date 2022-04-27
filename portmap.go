@@ -26,6 +26,15 @@ type portmapClient interface {
 // natpmpClient implements portmapClient for NAT-PMP.
 type natpmpClient natpmp.Client
 
+func wait(ctx context.Context, ch <-chan error) error {
+	select {
+	case err := <-ch:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // newNatpmpClient attempts to contact the NAT-PMP client on the default
 // gateway and returns a natpmpClient structure if successful.
 func newNatpmpClient(ctx context.Context) (*natpmpClient, error) {
@@ -38,11 +47,18 @@ func newNatpmpClient(ctx context.Context) (*natpmpClient, error) {
 
 	// NewClient always succeeds, verify that the gateway actually
 	// supports NAT-PMP.
-	_, err = c.GetExternalAddress()
+	ch := make(chan error, 1)
+	go func() {
+		defer close(ch)
+		_, err = c.GetExternalAddress()
+		if err != nil {
+			ch <- err
+		}
+	}()
+	err = wait(ctx, ch)
 	if err != nil {
 		return nil, err
 	}
-
 	return (*natpmpClient)(c), nil
 }
 
@@ -50,9 +66,19 @@ func newNatpmpClient(ctx context.Context) (*natpmpClient, error) {
 // allocated external port, which might be different from the port
 // requested, and a lifetime in seconds.
 func (c *natpmpClient) addPortMapping(ctx context.Context, label string, protocol string, port, externalPort uint16, lifetime int) (uint16, int, error) {
-	r, err := (*natpmp.Client)(c).AddPortMapping(
-		protocol, int(port), int(externalPort), lifetime,
-	)
+	var r *natpmp.AddPortMappingResult
+	ch := make(chan error, 1)
+	go func() {
+		defer close(ch)
+		var err error
+		r, err = (*natpmp.Client)(c).AddPortMapping(
+			protocol, int(port), int(externalPort), lifetime,
+		)
+		if err != nil {
+			ch <- err
+		}
+	}()
+	err := wait(ctx, ch)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -66,15 +92,26 @@ type upnpClient ig1.WANIPConnection1
 // local network.  If more than one are found, it tries to return one
 // that is on the default route.
 func newUpnpClient(ctx context.Context) (*upnpClient, error) {
-	clients, errs, err := ig1.NewWANIPConnection1Clients()
+	var clients []*ig1.WANIPConnection1
+	ch := make(chan error, 1)
+	go func() {
+		defer close(ch)
+		cs, errs, err := ig1.NewWANIPConnection1Clients()
+		if err != nil {
+			ch <- err
+		} else if len(cs) == 0 {
+			if len(errs) > 0 {
+				ch <- errs[0]
+			} else {
+				ch <- errors.New("no UPNP gateways found")
+			}
+		}
+		clients = cs
+	}()
+
+	err := wait(ctx, ch)
 	if err != nil {
 		return nil, err
-	}
-	if len(clients) == 0 {
-		if len(errs) > 0 {
-			return nil, errs[0]
-		}
-		return nil, errors.New("no UPNP gateways found")
 	}
 
 	if len(clients) == 1 {
