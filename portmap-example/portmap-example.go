@@ -59,7 +59,7 @@ func main() {
 		wg.Done()
 	}()
 
-	log.Print("Mappings established, press Ctrl-C to unmap")
+	log.Print("Mapping loop running, press Ctrl-C to clean up")
 
 	<-terminate
 
