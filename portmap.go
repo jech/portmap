@@ -314,12 +314,13 @@ func domap(ctx context.Context, label string, cache *clientCache, proto string, 
 			Lifetime: 0,
 		}
 		if client != nil {
-			ctx2, _ := context.WithTimeout(
+			ctx2, cancel := context.WithTimeout(
 				context.Background(), 2*time.Second,
 			)
 			_, _, err2 := client.addPortMapping(
 				ctx2, label, proto, internal, external, 0,
 			)
+			cancel()
 			if err == nil {
 				err = err2
 			}
