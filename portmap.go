@@ -5,10 +5,12 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/url"
 	"sync"
 	"time"
 
 	ig1 "github.com/huin/goupnp/dcps/internetgateway1"
+	ig2 "github.com/huin/goupnp/dcps/internetgateway2"
 	"github.com/jackpal/gateway"
 	natpmp "github.com/jackpal/go-nat-pmp"
 )
@@ -85,32 +87,73 @@ func (c *natpmpClient) addPortMapping(ctx context.Context, label string, protoco
 	return r.MappedExternalPort, int(r.PortMappingLifetimeInSeconds), nil
 }
 
+type WANIPConnection interface {
+	GetSpecificPortMappingEntryCtx(
+		context.Context, string, uint16, string,
+	) (uint16, string, bool, string, uint32, error)
+	AddPortMappingCtx(
+		context.Context, string, uint16, string, uint16, string,
+		bool, string, uint32,
+	) error
+	DeletePortMappingCtx(context.Context, string, uint16, string) error
+}
+
+func getWANIPLocation(client WANIPConnection) *url.URL {
+	switch client := client.(type) {
+	case *ig1.WANIPConnection1:
+		return client.Location
+	case *ig2.WANIPConnection1:
+		return client.Location
+	case *ig2.WANIPConnection2:
+		return client.Location
+	default:
+		return nil
+	}
+}
+
 // upnpClient implements portmapClient for uPNP.
-type upnpClient ig1.WANIPConnection1
+type upnpClient struct {
+	client WANIPConnection
+}
 
 // newUpnpClient attempts to discover a WAN IP Connection client on the
 // local network.  If more than one are found, it tries to return one
 // that is on the default route.
 func newUpnpClient(ctx context.Context) (*upnpClient, error) {
-	clients, _, err := ig1.NewWANIPConnection1ClientsCtx(ctx)
+	clients2, _, err := ig2.NewWANIPConnection2ClientsCtx(ctx)
 	if err != nil {
-		return nil, err
+		clients2 = nil
 	}
+	var clients1 []*ig1.WANIPConnection1
+	if len(clients2) == 0 {
+		clients1, _, err = ig1.NewWANIPConnection1ClientsCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var clients []WANIPConnection
+	for _, c2 := range clients2 {
+		clients = append(clients, c2)
+	}
+	for _, c1 := range clients1 {
+		clients = append(clients, c1)
+	}
+
 	if len(clients) == 0 {
 		return nil, errors.New("no UPNP gateways found")
 	}
-
 	if len(clients) == 1 {
-		return (*upnpClient)(clients[0]), nil
+		return &upnpClient{client: clients[0]}, nil
 	}
 
 	gw, err := gateway.DiscoverGateway()
 	if err != nil {
-		return (*upnpClient)(clients[0]), nil
+		return &upnpClient{client: clients[0]}, nil
 	}
 
 	for _, client := range clients {
-		location := client.Location
+		location := getWANIPLocation(client)
 		if location == nil {
 			continue
 		}
@@ -123,11 +166,11 @@ func newUpnpClient(ctx context.Context) (*upnpClient, error) {
 			continue
 		}
 		if ip.Equal(gw) {
-			return (*upnpClient)(client), nil
+			return &upnpClient{client: client}, nil
 		}
 	}
 
-	return (*upnpClient)(clients[0]), nil
+	return &upnpClient{client: clients[0]}, nil
 }
 
 // getMyIPv4 returns the local IPv4 address used by the default route.
@@ -166,7 +209,7 @@ func (c *upnpClient) addPortMapping(ctx context.Context, label string, protocol 
 		return 0, 0, err
 	}
 
-	ipc := (*ig1.WANIPConnection1)(c)
+	ipc := c.client
 
 	// Find a free port
 	ep := externalPort
