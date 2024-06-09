@@ -347,6 +347,8 @@ func Map(ctx context.Context, label string, internal uint16, kind int, f func(pr
 	return nil
 }
 
+const minInterval = 30 * time.Second
+
 func domap(ctx context.Context, label string, cache *clientCache, proto string, internal uint16, kind int, f func(proto string, status Status, err error)) {
 	var client portmapClient
 	external := internal
@@ -392,16 +394,21 @@ func domap(ctx context.Context, label string, cache *clientCache, proto string, 
 		}
 	}
 
+	interval := minInterval
 	for {
 		c, err := cache.get(ctx, kind)
 		if err != nil {
 			unmap(err)
-			err = sleep(30 * time.Second)
+			err = sleep(interval)
 			if err != nil {
 				return
 			}
+			if interval < 5*time.Minute {
+				interval = 2 * interval
+			}
 			continue
 		}
+		interval = minInterval
 		if c != client {
 			unmap(nil)
 			client = c
